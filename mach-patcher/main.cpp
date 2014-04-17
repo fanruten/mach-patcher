@@ -14,24 +14,25 @@
 #include "loader.h"
 #include "fat.h"
 
+#define LC_FUNCTION_STARTS 0x26 /* compressed table of function start addresses */
+
 void patchMachHeader(void *mem, uint32_t offset, char *injectedLibName)
 {
     mach_header *header = (mach_header *)((uint8_t *)mem + offset);
     int commandsCount = header->ncmds;
     printf("Commands count: %d\n", commandsCount);
     
-    dylib_command *lastDylibCommand = NULL;
+    uint8_t *placeForInject = NULL;
     load_command *command = (load_command *)((uint8_t *)header + sizeof(mach_header));
     for (int i = 0; i < commandsCount; i++) {
-        if (command->cmd == LC_LOAD_DYLIB) {
-            dylib_command *typedCommand = (dylib_command *)command;
-            lastDylibCommand = typedCommand;
-            printf("LC_LOAD_DYLIB: %s\n", (char *)((uint8_t *)typedCommand + typedCommand->dylib.name.offset));
+        if (command->cmd == LC_FUNCTION_STARTS) {
+            placeForInject = (uint8_t *)command;
+            break;
         }
         command = (load_command *)((uint8_t *)command + command->cmdsize);
     }
     
-    if (lastDylibCommand) {
+    if (placeForInject) {
         int libNameSize = (int)strlen(injectedLibName) + 1;
         int padding = 4 - libNameSize % 4;
         
@@ -43,7 +44,7 @@ void patchMachHeader(void *mem, uint32_t offset, char *injectedLibName)
         injectedCommand.dylib.timestamp = 0;
         injectedCommand.dylib.name.offset = 24;
         
-        uint8_t *newCommandPos = (uint8_t *)lastDylibCommand + lastDylibCommand->cmdsize;
+        uint8_t *newCommandPos = placeForInject;
         long bytesForMoving = header->sizeofcmds + sizeof(mach_header) - (int)((uint8_t *)newCommandPos - (uint8_t *)header);
         
         memmove((uint8_t *)newCommandPos + injectedCommand.cmdsize, newCommandPos, bytesForMoving);
